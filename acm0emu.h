@@ -10,7 +10,7 @@ struct CPU_FLG {
 };
 
 struct CPU {
-	int32_t reg[16];
+	uint32_t reg[16];
 	struct CPU_FLG flg;
 
 	const uint8_t* rom;
@@ -175,13 +175,15 @@ enum CPU_COND {
 	NV, // 1111	NV	Always	Any
 };
 
-void cpu_changeFlag(struct CPU* cpu, int32_t n) {
-	////x_printf("chgflg %d\n", n);
-	cpu->flg.z = n == 0;
-	cpu->flg.c = (int32_t)n < 0; // ?
-	cpu->flg.n = n >> 31;
+uint32_t cpu_changeFlag(struct CPU* cpu, uint64_t n) {
+	cpu->flg.z = (n & 0xffffffff) == 0;
+	cpu->flg.c = (n >> 32) != 0;
+	cpu->flg.n = (n >> 31) & 1;
 	cpu->flg.v = 0;
+	// printf("chgflg %llu(%llx) z:%d c:%d\n", n, n, cpu->flg.z, cpu->flg.c);
+	return (int32_t)n;
 }
+
 int cpu_checkFlag(struct CPU* cpu, int cond) {
 	////x_printf("flg: n:%d z:%d c:%d v:%d\n", cpu->flg.n, cpu->flg.z, cpu->flg.c, cpu->flg.v);
 	switch (cond) {
@@ -221,34 +223,37 @@ int cpu_execute(struct CPU* cpu) {
 		int rd = (op >> 8) & 7;
 		uint8_t n = op & 0xff;
 		//x_printf("R%d = %d\n", rd, n);
-		cpu_changeFlag(cpu, cpu->reg[rd] = n);
+		cpu->reg[rd] = n;
+		//cpu_changeFlag(cpu, cpu->reg[rd] = n);
 	} else if ((op >> 8) == 0b01000110) {
 		int rd = (op & 0x80) >> 4 | (op & 7);
 		int rm = (op >> 3) & 0xf;
 		//x_printf("R%d = R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rm]);
+		cpu->reg[rd] = cpu->reg[rm];
+		// cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rm]); // 2020-08-15 no flg change
 	} else if ((op >> 11) == 0b00110) {
 		int rd = (op >> 8) & 7;
 		uint8_t n = op & 0xff;
 		//x_printf("R%d += %d\n", rd, n);
-		cpu_changeFlag(cpu, cpu->reg[rd] += n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] + n); // 2020-08-15 for carry
 	} else if ((op >> 11) == 0b00111) {
 		int rd = (op >> 8) & 7;
 		uint8_t n = op & 0xff;
-		//x_printf("R%d -= %d\n", rd, n);
-		cpu_changeFlag(cpu, cpu->reg[rd] -= n);
+		//printf("R%d(%d) -= %d (+ %u)\n", rd, cpu->reg[rd], n, (uint32_t)(-n));
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] + (uint32_t)(-n));
+		//printf("R%d(%d)\n", rd, cpu->reg[rd]);
 	} else if ((op >> 9) == 0b0001110) {
 		int n = (op >> 6) & 7;
 		int rn = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = R%d + %d\n", rd, rn, n);
-		cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rn] + n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rn] + n);
 	} else if ((op >> 9) == 0b0001111) {
 		int n = (op >> 6) & 7;
 		int rn = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = R%d - %d\n", rd, rn, n);
-		cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rn] - n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rn] + (uint32_t)(-n));
 	} else if ((op >> 11) == 0b10100) {
 		int rd = (op >> 8) & 7;
 		uint8_t n = op & 0xff;
@@ -258,7 +263,7 @@ int cpu_execute(struct CPU* cpu) {
 		int rd = (op & 0x80) >> 4 | (op & 7);
 		int rm = (op >> 3) & 0xf;
 		//x_printf("R%d += R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] += cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] + cpu->reg[rm]);
 	} else if ((op >> 11) == 0b01001) {
 		int rd = (op >> 8) & 7;
 		uint8_t n = op & 0xff;
@@ -270,57 +275,57 @@ int cpu_execute(struct CPU* cpu) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = R%d << %d\n", rd, rm, n);
-		cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rm] << n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rm] << n);
 	} else if ((op >> 11) == 0b00001) {
 		int n = (op >> 6) & 0x1f;
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = R%d >> %d\n", rd, rm, n);
-		cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rm] >> n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rm] >> n); // ?
 	} else if ((op >> 6) == 0b0100000010) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d <<= R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] <<= cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] << (int32_t)cpu->reg[rm]);
 	} else if ((op >> 6) == 0b0100000011) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d >>= R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] >>= cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] >> (int32_t)cpu->reg[rm]);
 	} else if ((op >> 11) == 0b00010) {
 		int n = (op >> 6) & 0x1f;
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = ASR(R%d, %d)\n", rd, rm, n);
-		int32_t m = cpu->reg[rd];
+		uint64_t m = cpu->reg[rd];
 		m = m >> n;
-		cpu_changeFlag(cpu, cpu->reg[rd] = (uint32_t)n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, m);
 	} else if ((op >> 6) == 0b0100000100) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("ASR R%d, R%d\n", rd, rm);
-		int32_t n = cpu->reg[rd];
+		uint64_t n = cpu->reg[rd];
 		n = n >> cpu->reg[rd];
-		cpu_changeFlag(cpu, cpu->reg[rd] = (uint32_t)n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, n);
 	} else if ((op >> 6) == 0b0100001110) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("BIC R%d, R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] &= ~(1 << cpu->reg[rm])); //?
+		cpu->reg[rd] = cpu_changeFlag(cpu, cpu->reg[rd] & ~(1 << cpu->reg[rm])); //?
 	} else if ((op >> 6) == 0b01011101000) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = REV(R%d)\n", rd, rm);
-		uint32_t n = cpu->reg[rm];
+		uint64_t n = cpu->reg[rm];
 		n = ((n & 0xff) << 24) | ((n & 0xff00) << 8) | ((n & 0xff0000) >> 8) | ((n & 0xff000000) >> 24);
-		cpu_changeFlag(cpu, cpu->reg[rd] = n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, n);
 	} else if ((op >> 6) == 0b01011101001) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = REV16(R%d)\n", rd, rm);
 		uint32_t n = cpu->reg[rm];
 		n = ((n & 0xff) << 8) | ((n & 0xff00) >> 8) | ((n & 0xff0000) << 8) | ((n & 0xff000000) >> 8);
-		cpu_changeFlag(cpu, cpu->reg[rd] = n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, n);
 	} else if ((op >> 6) == 0b01011101011) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
@@ -329,34 +334,34 @@ int cpu_execute(struct CPU* cpu) {
 		n = ((n & 0xff) << 8) | ((n & 0xff00) >> 8); // ?
 		if (n & 0x8000)
 			n |= 0xffff0000;
-		cpu_changeFlag(cpu, cpu->reg[rd] = n);
+		cpu->reg[rd] = cpu_changeFlag(cpu, n);
 	} else if ((op >> 6) == 0b0100000101) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
-		//x_printf("ADC R%d, R%d\n", rd, rm); // Rn+=Rn+C
-		cpu_changeFlag(cpu, cpu->reg[rd] += cpu->reg[rm] + cpu->flg.c); // ?
+		// printf("ADC R%d, R%d C:%d\n", rd, rm, cpu->flg.c); // Rn+=Rn+C
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] + cpu->reg[rm] + cpu->flg.c); // ?
 	} else if ((op >> 6) == 0b0100000110) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("SDC R%d, R%d\n", rd, rm); // Rn-=Rn+C
-		cpu_changeFlag(cpu, cpu->reg[rd] -= cpu->reg[rm] + cpu->flg.c); // ?
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] + (uint32_t)(-(cpu->reg[rm] + cpu->flg.c))); // ?
 	} else if ((op >> 6) == 0b0100000111) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("ROR R%d, R%d\n", rd, rm);
 		uint32_t n = cpu->reg[rm];
-		uint32_t m = cpu->reg[rd];
+		uint64_t m = cpu->reg[rd];
 		m = (m >> n) | (m << (32 - n));
-		cpu_changeFlag(cpu, cpu->reg[rd] = m); // ?
+		cpu->reg[rd] = cpu_changeFlag(cpu, m); // ?
 	} else if ((op >> 6) == 0b0100001010) {
 		int rm = (op >> 3) & 7;
 		int rn = op & 7;
-		cpu_changeFlag(cpu, cpu->reg[rn] - cpu->reg[rm]);
+		cpu_changeFlag(cpu, (uint64_t)cpu->reg[rn] + (uint32_t)(-cpu->reg[rm]));
 		//printf("R%d(%d) - R%d(%d) C:%d\n", rn, cpu->reg[rn], rm, cpu->reg[rm], cpu->flg.c);
 	} else if ((op >> 8) == 0b01000101) {
 		int rm = (op >> 3) & 0xf;
 		int rn = ((op >> 4) & 8) | (op & 7);
-		cpu_changeFlag(cpu, cpu->reg[rn] - cpu->reg[rm]);
+		cpu_changeFlag(cpu, (uint64_t)cpu->reg[rn] + (uint32_t)(-cpu->reg[rm]));
 		//printf("R%d - R%d C:%d\n", rn, rm, cpu->flg.c);
 	} else if ((op >> 6) == 0b0100001000) {
 		int rm = (op >> 3) & 7;
@@ -367,7 +372,7 @@ int cpu_execute(struct CPU* cpu) {
 		int rn = (op >> 8) & 7;
 		int n = op & 0xff;
 		//x_printf("R%d - %d\n", rn, n);
-		cpu_changeFlag(cpu, cpu->reg[rn] - n);
+		cpu_changeFlag(cpu, (uint64_t)cpu->reg[rn] + (uint32_t)(-n));
 	} else if ((op >> 6) == 0b0100001100) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
@@ -387,17 +392,17 @@ int cpu_execute(struct CPU* cpu) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d *= R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] *= cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] * cpu->reg[rm]);
 	} else if ((op >> 6) == 0b0100001001) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = -R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] = -cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)-cpu->reg[rm]); // ?
 	} else if ((op >> 6) == 0b0100001111) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = ~R%d\n", rd, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] = ~cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)~cpu->reg[rm]); // ?
 	} else if ((op >> 7) == 0b101100000) {
 		int n = op & 0x7f;
 		//x_printf("SP += %d\n", n);
@@ -411,13 +416,13 @@ int cpu_execute(struct CPU* cpu) {
 		int rn = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = R%d + R%d\n", rd, rn, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rn] + cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rn] + cpu->reg[rm]);
 	} else if ((op >> 9) == 0b0001101) {
 		int rm = (op >> 6) & 7;
 		int rn = (op >> 3) & 7;
 		int rd = op & 7;
 		//x_printf("R%d = R%d - R%d\n", rd, rn, rm);
-		cpu_changeFlag(cpu, cpu->reg[rd] = cpu->reg[rn] - cpu->reg[rm]);
+		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rn] + (uint32_t)(-cpu->reg[rm]));
 	} else if ((op >> 11) == 0b10101) {
 		int rd = (op >> 8) & 7;
 		int n = op & 0xff;
@@ -529,7 +534,7 @@ int cpu_execute(struct CPU* cpu) {
 		if (n & 0x8000) { // ?
 			n |= 0xffff0000;
 		}
-		cpu_changeFlag(cpu, cpu->reg[rd] = n);
+		cpu_changeFlag(cpu, cpu->reg[rd] = n); // ?
 	} else if ((op >> 6) == 0b1011001001) {
 		int rm = (op >> 3) & 7;
 		int rd = op & 7;
