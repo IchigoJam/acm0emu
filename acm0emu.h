@@ -179,7 +179,7 @@ uint32_t cpu_changeFlag(struct CPU* cpu, uint64_t n) {
 	cpu->flg.z = (n & 0xffffffff) == 0;
 	cpu->flg.c = (n >> 32) != 0;
 	cpu->flg.n = (n >> 31) & 1;
-	cpu->flg.v = 0;
+	cpu->flg.v = 0; // 未対応
 	// printf("chgflg %llu(%llx) z:%d c:%d\n", n, n, cpu->flg.z, cpu->flg.c);
 	return (int32_t)n;
 }
@@ -263,7 +263,8 @@ int cpu_execute(struct CPU* cpu) {
 		int rd = (op & 0x80) >> 4 | (op & 7);
 		int rm = (op >> 3) & 0xf;
 		//x_printf("R%d += R%d\n", rd, rm);
-		cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] + cpu->reg[rm]);
+		cpu->reg[rd] += cpu->reg[rm]; // 2020-08-15 no flg change
+		// cpu->reg[rd] = cpu_changeFlag(cpu, (uint64_t)cpu->reg[rd] + cpu->reg[rm]);
 	} else if ((op >> 11) == 0b01001) {
 		int rd = (op >> 8) & 7;
 		uint8_t n = op & 0xff;
